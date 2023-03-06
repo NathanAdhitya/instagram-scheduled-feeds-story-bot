@@ -37,7 +37,7 @@ cl.login_by_sessionid(data.get("sessionid"))
 # Get pending posts
 
 pendingfiles = [f for f in listdir(PATH_PENDING) if isfile(
-    join(PATH_PENDING, f))]
+    join(PATH_PENDING, f)) and f.endswith(".json")]
 
 for f in pendingfiles:
     try:
