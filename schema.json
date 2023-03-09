@@ -16,6 +16,12 @@
         "image_src": {
             "type": "string"
         },
+        "album": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
         "tags": {
             "type": "array",
             "items": {

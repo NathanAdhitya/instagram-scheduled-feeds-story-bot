@@ -11,6 +11,10 @@ from utils.gotify_util import send_notification
 from instagrapi.types import Usertag, Location
 from instagrapi.types import StoryMention, StoryMedia
 from instagrapi.types import StoryMention, StoryMedia, StoryLink, StoryHashtag
+from time import sleep
+
+from instagrapi.mixins.challenge import ChallengeChoice
+
 
 PATH_PENDING = "data/pending"
 PATH_FAILED = "data/failed"
@@ -23,16 +27,20 @@ with open("schema.json") as f:
     f.close()
 
 # Get sessionid & prep client
-data = None
-with open("session.json") as session_file:
-    data = json.load(session_file)
-    session_file.close()
-
-assert data != None
 assert schema != None
 
+
+def challenge_code_handler(username, choice):
+    if choice == ChallengeChoice.SMS:
+        return input("Challenge (SMS):")
+    elif choice == ChallengeChoice.EMAIL:
+        return input("Challenge (EMAIL):")
+    return False
+
+
 cl = Client()
-cl.login_by_sessionid(data.get("sessionid"))
+cl.challenge_code_handler = challenge_code_handler
+cl.load_settings("session.json")
 
 # Get pending posts
 
@@ -57,6 +65,18 @@ for f in pendingfiles:
             data.get("publish_datetime")
         )
 
+        # Make sure destination pics do exist.
+        if data.get("image_src") is not None:
+            if not isfile(join(PATH_PICS, data.get("image_src"))):
+                raise Exception(
+                    "Invalid image_src path. (File not found/is not file)")
+        elif data.get("album") is not None:
+            if False in [isfile(join(PATH_PICS, pic)) for pic in data.get("album")]:
+                raise Exception(
+                    "Invalid image_src path. (File not found/is not file)")
+        else:
+            raise Exception("No photo/album found in JSON.")
+
         if data.get("type") != "FEED" and data.get("type") != "STORY":
             raise Exception("'type' should be 'FEED' or 'STORY'")
 
@@ -72,11 +92,6 @@ for f in pendingfiles:
 
         print(f"{f} is due at {expected_post_date}, posting now...")
 
-        # Make sure destination pics do exist.
-        if not isfile(join(PATH_PICS, data.get("image_src"))):
-            raise Exception(
-                "Invalid image_src path. (File not found/is not file)")
-
         # Post the actual thing.
         if data.get("type") == "FEED":
             # Resolve mentions
@@ -86,33 +101,47 @@ for f in pendingfiles:
             feed_mentions = [Usertag(user=u, x=0.5, y=0.5)
                              for u in user_mentions]
 
-            links = []
-            if data.get("link"):
-                links.insert(0, StoryLink(webUri=data.get(link)))
+            if data.get("image_src") is not None:
+                cl.photo_upload(
+                    join(PATH_PICS, data.get("image_src")), data.get("caption"), usertags=feed_mentions
+                )
+            elif data.get("album") is not None:
+                cl.album_upload(
+                    [join(PATH_PICS, pic) for pic in data.get("album")], data.get("caption"), usertags=feed_mentions
+                )
 
-            cl.photo_upload(
-                join(PATH_PICS, data.get("image_src")), data.get("caption"), usertags=feed_mentions, links=links
-            )
+            # sleep(8)
+            # # edit caption since it did not work first try most of the time
+            # cl.media_edit(new_feed.pk, data.get("caption"))
         elif data.get("type") == "STORY":
             # Resolve mentions
             raw_mentions = data.get("tags")
             user_mentions = [cl.user_info_by_username(
                 u) for u in raw_mentions]
-            story_mentions = [StoryMention(user=u, x=0.5, y=0)
-                              for u in user_mentions]
+            story_mentions = []
+
+            mention_y = 0
+            for u in user_mentions:
+                story_mentions.insert(0, StoryMention(
+                    user=u, x=0.5, y=mention_y, width=0.8, height=0.1))
+                mention_y += 0.1
+
+            links = []
+            if data.get("link"):
+                links.insert(0, StoryLink(webUri=data.get("link")))
 
             caption = " ".join(["@"+mention for mention in raw_mentions])
 
             cl.photo_upload_to_story(join(PATH_PICS, data.get(
-                "image_src")), caption, mentions=story_mentions)
+                "image_src")), caption, mentions=story_mentions, links=links)
 
         rename(join(PATH_PENDING, f), join(PATH_DONE, f))
         print(f"Finished processing {f}")
-        send_notification("", f"Posted {f} successfully")
+        send_notification("Yay!", f"Posted {f} successfully")
     except Exception as e:
         print(f"Error reading {f}, {e}")
-        send_notification(e, f"Failed to post {f}")
-        # traceback.print_exc()
+        send_notification(str(e), f"Failed to post {f}")
+        traceback.print_exc()
         rename(join(PATH_PENDING, f), join(PATH_FAILED, f))
 
 print("Script finished.")
