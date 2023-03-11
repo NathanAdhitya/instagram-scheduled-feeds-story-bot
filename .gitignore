@@ -1,4 +1,5 @@
 data/*/*
+wizard_data/*/*
 .env
 session.json
 !.gitkeep
